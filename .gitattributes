@@ -1,0 +1,6 @@
+# Keep LF in the working tree. These files are read by Node's ESM loader as-is;
+# a CRLF rewrite would change bytes for no benefit and churn every line on the
+# next edit. Windows checkouts stay LF because of `eol=lf`.
+* text=auto eol=lf
+*.png binary
+*.ico binary

@@ -1,0 +1,13 @@
+# The profile installs this package as a `link:` dependency, so the junction
+# node_modules/ holds only @deepseek-ai peer links — never commit it.
+node_modules/
+
+# Remote-control links carry a `hash` secret. Keep them out of history: the live
+# link lives in the profile's cordis.patch.yml, which is outside this repo.
+*.link
+local-link.txt
+*remote-link*
+
+.DS_Store
+Thumbs.db
+*.log

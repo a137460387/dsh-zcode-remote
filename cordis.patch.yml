@@ -1,0 +1,11 @@
+# Bundle layer of dsh-zcode-remote: inserts the tool plugin into the profile
+# tree. The connection link itself stays in the user's own patch layer
+# (<profile>/cordis.patch.yml) via an id-targeted config override:
+#
+#   - id: zcode-remote
+#     config:
+#       remoteUrl: https://zcode.z.ai/remote/v4?sid=...&hash=...&t=...&mid=...
+- insert:
+  - id: zcode-remote
+    name: dsh-zcode-remote
+    config: {}
