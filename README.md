@@ -46,16 +46,19 @@ wire-protocol constant:
 ```
 
 
-On top of that the plugin registers three dsh agent tools:
+On top of that the plugin registers four dsh agent tools:
 
 - **`zcode_remote_dispatch`** — send a prompt to a desktop task and collect the
   streamed assistant reply (completion = 12 s of frame silence, capped by
   `wait_seconds`, max 600 s).
-- **`zcode_remote_status`** — list desktop workspaces and recent tasks.
+- **`zcode_remote_status`** — list one device's workspaces, recent tasks and
+  running-task count.
+- **`zcode_remote_devices`** — list the reachable devices, their configured
+  names, the default, and which currently hold a pairing. Needs no connection.
 - **`zcode_remote_stop`** — interrupt a running desktop task.
 
-All three accept an optional `url` to replace an expired remote link at call
-time (see [Configure](#configure)).
+All three device-scoped tools accept `device` or `url` to choose the machine
+(see [Reaching several machines](#reaching-several-machines)).
 
 ## Install
 
@@ -86,31 +89,55 @@ The link is optional at boot: a profile starts cleanly without it and the tools
 explain what to pass. That keeps the link out of the profile for setups that
 prefer supplying it per call.
 
-### Replacing an expired link without editing the profile
+## Reaching several machines
 
-The desktop link carries a timestamp and expires. Every tool accepts an optional
-`url`, so an expired link is replaced in-conversation:
+A remote-control link identifies **one device pairing**, so a link selects
+*which machine* to act on. Configure each machine once and address it by name:
+
+```yaml
+- id: zcode-remote
+  config:
+    device: laptop                       # what a call uses when it names nothing
+    devices:
+      laptop: https://zcode.z.ai/remote/v4?sid=…&hash=…&name=MateBook-X-Pro
+      desktop: https://zcode.z.ai/remote/v4?sid=…&hash=…&name=WorkStation
+      server:  https://zcode.z.ai/remote/v4?sid=…&hash=…&name=BuildBox
+```
 
 ```
-zcode_remote_status(url: "https://zcode.z.ai/remote/v4?sid=…&hash=…&t=…&mid=…")
+zcode_remote_devices()                                  # what can I reach?
+zcode_remote_status(device: "server")                   # that machine's tasks
+zcode_remote_dispatch(device: "desktop", text: "…")     # run work over there
+zcode_remote_dispatch(url: "https://zcode.z.ai/…")      # a machine not in the map
 ```
 
-The override wins for that call and every later call. Passing a different link
-retires the previous session (closing its socket) and pairs with the new one, so
-no profile restart is needed.
+Resolution order for which machine a call targets:
 
-A malformed `url` (one without `sid=`) fails loud rather than silently falling
-back to the configured link, which could still be the expired one you were
-trying to replace.
+1. `device` — a configured name (fails loud if unknown, listing the known names)
+2. `url` — a full link, for a machine not configured
+3. `config.device` — the configured default
+4. `config.remoteUrl` / `remoteSid`+`remoteHash` — the original single-device form
 
-When a pairing or bridge failure occurs, the session is released: the next call
-reconnects from scratch instead of replaying a dead socket.
+**Each machine keeps its own live session.** Addressing one device never
+disturbs another: switching desktop → server → desktop reuses the desktop's
+existing pairing and subscription instead of re-pairing. Pairings are keyed by
+the link's `sid`, so a re-issued link for the same pairing (new `hash` and `t`,
+same `sid`) replaces that session while leaving other machines alone.
+
+Only a machine whose own connection fails is released; the rest stay connected.
+A `200 OK`-looking dispatch to the wrong machine is impossible by construction:
+a malformed `url` fails loud rather than falling back to the default device.
+
+The original single-device configuration keeps working unchanged — `remoteUrl`
+alone is simply a default device with no name.
 
 ## Notes & limits
 
 - **One terminal per link**: the relay allows a single live terminal per
   session — having the phone page and this driver connected at the same time
-  kicks one of them (`KICKED`).
+  kicks one of them (`KICKED`). Each configured machine counts separately.
+- **The running-task ceiling is per machine**, not global: 3 slots on one device
+  do not consume another's.
 - **Desktop must be alive**: if the desktop's window host is down you get
   `workspace-bridge-error(desktop-disconnected): 未找到桌面窗口 host process`.
 - The link carries a secret (`hash`); treat the config file accordingly.
@@ -122,20 +149,19 @@ reconnects from scratch instead of replaying a dead socket.
 ## Development
 
 ```
-lib/zcode-remote-client.js   protocol driver (no dependencies, plain ESM)
-lib/index.js                 cordis plugin: Config + 3 tools
-cordis.patch.yml             bundle layer: inserts the plugin entry
-test/protocol.test.mjs       wire codec: CRC32, framing, assembly
-test/url-override.test.mjs   link resolution and the tool surface
-test/running-tasks.test.mjs  running-task counting and the capacity guard
+lib/zcode-remote-client.js        protocol driver (no dependencies, plain ESM)
+lib/index.js                      cordis plugin: Config + 4 tools, device routing
+cordis.patch.yml                  bundle layer: inserts the plugin entry
+test/protocol.test.mjs            wire codec: CRC32, framing, assembly
+test/device-addressing.test.mjs   target resolution and the tool surface
+test/session-cache.test.mjs       per-device session isolation
+test/running-tasks.test.mjs       running-task counting and the capacity guard
 ```
 
 Run the tests with plain Node (no test runner needed):
 
 ```bash
-node test/protocol.test.mjs
-node test/url-override.test.mjs
-node test/running-tasks.test.mjs
+for f in test/*.test.mjs; do node "$f"; done
 ```
 
 The package is installed into the profile as a `link:` dependency, so this
