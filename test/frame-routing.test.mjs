@@ -145,14 +145,17 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
   assert('only non-blank assistant text is a reply', JSON.stringify(session.replyRows(a).map(r => r.text)) === '["real"]')
 }
 
-// ---- Collecting releases the subscription, so a reused client does not accumulate ----
+// ---- A SETTLED task releases its subscription, so a reused client does not accumulate ----
 {
-  const { session, unsubscribed } = harness()
+  const { session, listeners, unsubscribed } = harness()
   const a = await session.startDispatch({ text: 'x' })
-  await session.collectDispatch(a, { waitMs: 1 })
-  assert('collecting unsubscribes that task', unsubscribed.length === 1
+  // Deliver a reply, then fake the silence the completion heuristic waits for.
+  listeners[0].handler(frame(a.subscriptionId, { kind: 'deltas', deltas: [{ rowId: 1, append: 'done' }] }))
+  a.lastChange = Date.now() - 20000
+  await session.collectDispatch(a, { waitMs: 50 })
+  assert('a settled collect unsubscribes that task', unsubscribed.length === 1
     && unsubscribed[0].subscriptionId === a.subscriptionId)
-  assert('collecting drops the routing entry', !session.dispatchHandlers.has(a.key))
+  assert('a settled collect drops the routing entry', !session.dispatchHandlers.has(a.key))
 }
 
 // ---- Re-subscribing moves the handler, so the refreshed stream still lands ----

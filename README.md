@@ -54,8 +54,9 @@ On top of that the plugin registers five dsh agent tools:
   accepted; fetch the reply later with `zcode_remote_collect`. `new_task: true`
   creates a fresh task for the prompt instead of reusing a conversation.
 - **`zcode_remote_collect`** — fetch the reply of an async dispatch, by the same
-  client and the `session_id` the dispatch returned, and release its
-  subscription.
+  client and the `session_id` the dispatch returned. A task is released only once
+  it has **completed** (a reply, then 12 s of silence); an unfinished one keeps
+  its subscription, so calling collect again simply keeps waiting for it.
 - **`zcode_remote_status`** — list one client's workspaces, recent tasks and
   running-task count.
 - **`zcode_remote_devices`** — list the reachable clients, their configured
@@ -92,12 +93,21 @@ zcode_remote_dispatch(device:"hw", text:"…", new_task:true, async:true)  → s
 
 zcode_remote_collect(device:"hw", session_id:"sess_…")   # each reply, when ready
 zcode_remote_collect(device:"hp", session_id:"sess_…")
+# a task that has not finished yet reports complete:false — collect it again
 ```
+
+Each task completes **independently**: one finishing does not stop its siblings,
+and collecting one does not touch the others. A task is complete once it has
+produced a reply and then been silent for 12 s. `wait_seconds` is only a budget:
+an unfinished task keeps its subscription, so a later `zcode_remote_collect`
+picks up where the last one left off, instead of losing the stream mid-answer.
 
 `dispatch` refuses at the ceiling with the observed count and points at
 `zcode_remote_stop`, rather than queueing on the client and burning the wait
-budget. Collecting a task releases its subscription, so a long-lived pairing
-does not accumulate them.
+budget. Only a *completed* task releases its subscription, so a long-lived
+pairing does not accumulate them, and an aborted collect never drops the shared
+connection — the socket is held per client, so losing it would take down every
+task on that client at once.
 
 ## Install
 
@@ -204,6 +214,7 @@ test/device-addressing.test.mjs   target resolution and the tool surface
 test/session-cache.test.mjs       per-client session isolation
 test/running-tasks.test.mjs       running-task counting and the capacity guard
 test/frame-routing.test.mjs       concurrent-task frame demultiplexing
+test/task-independence.test.mjs   per-task completion and reusable collect
 ```
 
 Run the tests with plain Node (no test runner needed):
