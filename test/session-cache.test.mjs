@@ -67,15 +67,17 @@ function makeCache() {
   assert('releasing an unpaired device changes nothing', built.length === 1)
 }
 
-// ---- A re-issued link for the SAME pairing replaces the session ----
-// The desktop re-issues a link with a fresh timestamp and credential; the sid
-// still identifies the same pairing, so the stale session must be replaced.
+// ---- A link whose sid matches an existing entry, but whose URL differs, replaces ----
+// Regenerating a link on a client issues a NEW sid (verified live: two links from
+// one client shared a mid but had different sids), so in practice each link is a
+// fresh key. Same sid + different URL means a stale entry under that id; the
+// socket can no longer authenticate, so the entry is replaced.
 {
   const { cache, built } = makeCache()
   const first = cache.acquire(LINK_A)
   const reissued = `https://zcode.z.ai/remote/v4?sid=S_A&hash=NEW&t=999&mid=M_S_A&name=Alpha`
   const second = cache.acquire(reissued)
-  assert('a re-issued link replaces the session', second !== first && built.length === 2)
+  assert('a same-sid link replaces the session', second !== first && built.length === 2)
   assert('the stale session was disposed', first.disposed === true)
   assert('the pairing id is unchanged', cache.keys().length === 1)
   assert('re-acquiring the new link reuses it', cache.acquire(reissued) === second)

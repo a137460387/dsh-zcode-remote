@@ -44,20 +44,31 @@ try {
   assert(`Config accepts a device map (got ${error.message})`, false)
 }
 
-// ---- Four tools, all device-scoped except the roster ----
+// ---- Five tools, all client-scoped except the roster ----
 const multi = { devices: { alpha: LINK_A, beta: LINK_B }, device: 'beta' }
 const tools = mount(multi)
-assert('four tools registered', tools.size === 4)
+assert('five tools registered', tools.size === 5)
 assert('roster tool exists', tools.has('zcode_remote_devices'))
-assert('all three device tools accept `device`',
-  ['zcode_remote_dispatch', 'zcode_remote_status', 'zcode_remote_stop']
+assert('collect tool exists', tools.has('zcode_remote_collect'))
+assert('all client tools accept `device`',
+  ['zcode_remote_dispatch', 'zcode_remote_status', 'zcode_remote_stop', 'zcode_remote_collect']
     .every(n => 'device' in (tools.get(n).parameters.properties ?? {})))
-assert('all three device tools accept `url`',
-  ['zcode_remote_dispatch', 'zcode_remote_status', 'zcode_remote_stop']
+assert('all client tools accept `url`',
+  ['zcode_remote_dispatch', 'zcode_remote_status', 'zcode_remote_stop', 'zcode_remote_collect']
     .every(n => 'url' in (tools.get(n).parameters.properties ?? {})))
 assert('dispatch keeps its own parameters',
-  ['text', 'session_id', 'wait_seconds'].every(p => p in tools.get('zcode_remote_dispatch').parameters.properties))
+  ['text', 'session_id', 'wait_seconds', 'async', 'new_task']
+    .every(p => p in tools.get('zcode_remote_dispatch').parameters.properties))
 assert('`text` stays required', JSON.stringify(tools.get('zcode_remote_dispatch').parameters.required) === '["text"]')
+assert('collect requires a task id',
+  JSON.stringify(tools.get('zcode_remote_collect').parameters.required) === '["session_id"]')
+// Concurrent tasks on one client must not serialize against each other. The
+// classifier soft-validates its arguments first, so valid args must be given:
+// invalid ones are exclusive by design.
+assert('dispatch declares itself concurrency-safe',
+  tools.get('zcode_remote_dispatch').isConcurrencySafe?.({ text: 'x' }) === true)
+assert('collect declares itself concurrency-safe',
+  tools.get('zcode_remote_collect').isConcurrencySafe?.({ session_id: 'sess_x' }) === true)
 
 // ---- Target selection ----
 assert('a named device selects that device\'s link',

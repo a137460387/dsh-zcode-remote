@@ -46,19 +46,58 @@ wire-protocol constant:
 ```
 
 
-On top of that the plugin registers four dsh agent tools:
+On top of that the plugin registers five dsh agent tools:
 
-- **`zcode_remote_dispatch`** — send a prompt to a desktop task and collect the
-  streamed assistant reply (completion = 12 s of frame silence, capped by
-  `wait_seconds`, max 600 s).
-- **`zcode_remote_status`** — list one device's workspaces, recent tasks and
+- **`zcode_remote_dispatch`** — send a prompt to a task on a ZCode client. By
+  default waits for the reply (completion = 12 s of frame silence, capped by
+  `wait_seconds`, max 600 s). With `async: true` returns as soon as the task is
+  accepted; fetch the reply later with `zcode_remote_collect`. `new_task: true`
+  creates a fresh task for the prompt instead of reusing a conversation.
+- **`zcode_remote_collect`** — fetch the reply of an async dispatch, by the same
+  client and the `session_id` the dispatch returned, and release its
+  subscription.
+- **`zcode_remote_status`** — list one client's workspaces, recent tasks and
   running-task count.
-- **`zcode_remote_devices`** — list the reachable devices, their configured
+- **`zcode_remote_devices`** — list the reachable clients, their configured
   names, the default, and which currently hold a pairing. Needs no connection.
-- **`zcode_remote_stop`** — interrupt a running desktop task.
+- **`zcode_remote_stop`** — interrupt a running task on a client.
 
-All three device-scoped tools accept `device` or `url` to choose the machine
+All client-scoped tools accept `device` or `url` to choose the client
 (see [Reaching several machines](#reaching-several-machines)).
+
+## Running several tasks on one client
+
+Two hard constraints shape this, both verified against the client's own code:
+
+1. **One link, one connection.** The relay admits exactly one terminal per link;
+   a second connection kicks the first (`KICKED`). So this plugin holds ONE
+   relay connection per client and multiplexes every task over it — it never
+   opens a second socket for a second task. Keep the phone/browser page for a
+   link closed while this plugin uses it, or the two will kick each other
+   endlessly (both sides auto-reconnect).
+2. **A client serves a bounded number of concurrent tasks** (`maxRunningTasks`,
+   default 3). Concurrent tasks each get their own conversation (`new_task:
+   true`) or an explicitly named `session_id`, and are told apart by the
+   `subscriptionId` each `subscribeConversationV4` returns — that id, not the
+   socket, separates one task's output from another's.
+
+Fan out and gather:
+
+```
+# three tasks on one client, or spread over several — dispatches are
+# concurrency-safe, so issue them together
+zcode_remote_dispatch(device:"hw", text:"…", new_task:true, async:true)  → sessionId
+zcode_remote_dispatch(device:"hp", text:"…", new_task:true, async:true)  → sessionId
+zcode_remote_dispatch(device:"hw", text:"…", new_task:true, async:true)  → sessionId
+
+zcode_remote_collect(device:"hw", session_id:"sess_…")   # each reply, when ready
+zcode_remote_collect(device:"hp", session_id:"sess_…")
+```
+
+`dispatch` refuses at the ceiling with the observed count and points at
+`zcode_remote_stop`, rather than queueing on the client and burning the wait
+budget. Collecting a task releases its subscription, so a long-lived pairing
+does not accumulate them.
 
 ## Install
 
@@ -118,15 +157,17 @@ Resolution order for which machine a call targets:
 3. `config.device` — the configured default
 4. `config.remoteUrl` / `remoteSid`+`remoteHash` — the original single-device form
 
-**Each machine keeps its own live session.** Addressing one device never
+**Each client keeps its own live session.** Addressing one client never
 disturbs another: switching desktop → server → desktop reuses the desktop's
-existing pairing and subscription instead of re-pairing. Pairings are keyed by
-the link's `sid`, so a re-issued link for the same pairing (new `hash` and `t`,
-same `sid`) replaces that session while leaving other machines alone.
+existing pairing and subscription instead of re-pairing. Sessions are keyed by
+the link's `sid` — which is also the relay's unit of "one terminal per link",
+so one key = one admitted connection. Regenerating a link on a client issues a
+NEW `sid` (verified live: two links from one client shared a `mid` but had
+different `sid`s), and the stale entry is released when its connection fails.
 
-Only a machine whose own connection fails is released; the rest stay connected.
-A `200 OK`-looking dispatch to the wrong machine is impossible by construction:
-a malformed `url` fails loud rather than falling back to the default device.
+Only a client whose own connection fails is released; the rest stay connected.
+A `200 OK`-looking dispatch to the wrong client is impossible by construction:
+a malformed `url` fails loud rather than falling back to the default client.
 
 The original single-device configuration keeps working unchanged — `remoteUrl`
 alone is simply a default device with no name.
@@ -135,27 +176,34 @@ alone is simply a default device with no name.
 
 - **One terminal per link**: the relay allows a single live terminal per
   session — having the phone page and this driver connected at the same time
-  kicks one of them (`KICKED`). Each configured machine counts separately.
-- **The running-task ceiling is per machine**, not global: 3 slots on one device
+  kicks one of them (`KICKED`). Each configured client counts separately, and
+  one client's concurrent tasks share this plugin's single connection to it.
+- **The running-task ceiling is per client**, not global: 3 slots on one client
   do not consume another's.
+- **Links are short-lived**: live testing measured a link authenticating
+  ~1.5 min after generation and being refused ~10 min after. Treat every link
+  as per-session material; do not expect a pasted link to keep working across
+  restarts or long pauses.
 - **Desktop must be alive**: if the desktop's window host is down you get
   `workspace-bridge-error(desktop-disconnected): 未找到桌面窗口 host process`.
 - The link carries a secret (`hash`); treat the config file accordingly.
 - Known-verified live: pairing, bootstrap, workspace list, bridge open,
   hello/initialize RPC. Subscribe + sendText follow the official page code
   path 1:1 but were blocked in final live testing by the desktop host being
-  offline.
+  offline. The frame routing, async dispatch and collect paths are unit-tested
+  against synthetic frames, not yet verified against a live desktop.
 
 ## Development
 
 ```
 lib/zcode-remote-client.js        protocol driver (no dependencies, plain ESM)
-lib/index.js                      cordis plugin: Config + 4 tools, device routing
+lib/index.js                      cordis plugin: Config + 5 tools, client routing
 cordis.patch.yml                  bundle layer: inserts the plugin entry
 test/protocol.test.mjs            wire codec: CRC32, framing, assembly
 test/device-addressing.test.mjs   target resolution and the tool surface
-test/session-cache.test.mjs       per-device session isolation
+test/session-cache.test.mjs       per-client session isolation
 test/running-tasks.test.mjs       running-task counting and the capacity guard
+test/frame-routing.test.mjs       concurrent-task frame demultiplexing
 ```
 
 Run the tests with plain Node (no test runner needed):
