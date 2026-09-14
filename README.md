@@ -52,7 +52,11 @@ On top of that the plugin registers five dsh agent tools:
   default waits for the reply (completion = 12 s of frame silence, capped by
   `wait_seconds`, max 600 s). With `async: true` returns as soon as the task is
   accepted; fetch the reply later with `zcode_remote_collect`. `new_task: true`
-  creates a fresh task for the prompt instead of reusing a conversation.
+  creates a fresh task for the prompt instead of reusing a conversation — the
+  prompt rides the createSession command's `firstInput.text` (the web page's
+  "新建任务" path), because a relay-created session only binds to a desktop task
+  when the first input rides creation; create-then-sendText fails with
+  `FOREIGN KEY constraint failed`.
 - **`zcode_remote_collect`** — fetch the reply of an async dispatch, by the same
   client and the `session_id` the dispatch returned. A task is released only once
   it has **completed** (a reply, then 12 s of silence); an unfinished one keeps
@@ -222,18 +226,31 @@ alone is simply a default device with no name.
   one client's concurrent tasks share this plugin's single connection to it.
 - **The running-task ceiling is per client**, not global: 3 slots on one client
   do not consume another's.
-- **Links are short-lived**: live testing measured a link authenticating
-  ~1.5 min after generation and being refused ~10 min after. Treat every link
-  as per-session material; do not expect a pasted link to keep working across
-  restarts or long pauses.
+- **Model & reasoning level**: a new task inherits the desktop's workspace
+  defaults unless specified. The Z.ai Start Plan channel (`builtin:zai-start-plan`)
+  serves `GLM-5.3` and `GLM-5.3-Flash`, with reasoning levels `low | high | max`
+  (`max` = 最高). The createSession envelope accepts
+  `config: { provider, model, thought }` — the standalone driver
+  (`remote-driver.mjs`, see the `.zcode-dsh` research dir) exposes this via
+  `--model/--thought/--provider`; this plugin does not yet expose it as a tool
+  parameter. Invalid values are **silently** replaced by desktop defaults, so
+  verify via the subscription snapshot's `config` field — agent self-reports are
+  unreliable (a GLM-5.3-Flash agent reported `THOUGHT=high` while the snapshot
+  showed `max`).
+- **Links are longer-lived than first measured**: the original 10-min TTL
+  estimate came from a revoked test link. A freshly generated link stayed
+  working for 45+ minutes of continuous dispatching. Still treat links as
+  per-session material — regenerate when a pairing is refused.
 - **Desktop must be alive**: if the desktop's window host is down you get
   `workspace-bridge-error(desktop-disconnected): 未找到桌面窗口 host process`.
 - The link carries a secret (`hash`); treat the config file accordingly.
-- Known-verified live: pairing, bootstrap, workspace list, bridge open,
-  hello/initialize RPC. Subscribe + sendText follow the official page code
-  path 1:1 but were blocked in final live testing by the desktop host being
-  offline. The frame routing, async dispatch and collect paths are unit-tested
-  against synthetic frames, not yet verified against a live desktop.
+- Live-verified end-to-end against a real desktop (HP, `D:\tools\dhsh` and
+  `C:\Users\luoguangyu\ZCodeProject`): pairing, bootstrap, workspace list,
+  bridge open, hello/initialize, subscribe, createSession+firstInput
+  (with model/thought config), conversationRowsRangeV4 polling, reply
+  read-back, and the `onDynamicConversationFrame` state snapshot. The frame
+  routing, async dispatch and collect paths are unit-tested against synthetic
+  frames.
 
 ## Development
 
@@ -245,8 +262,9 @@ test/protocol.test.mjs            wire codec: CRC32, framing, assembly
 test/device-addressing.test.mjs   target resolution and the tool surface
 test/session-cache.test.mjs       per-client session isolation
 test/running-tasks.test.mjs       running-task counting and the capacity guard
-test/frame-routing.test.mjs       concurrent-task frame demultiplexing
+test/frame-routing.test.mjs       concurrent-task frame demultiplexing + new-task (firstInput) path
 test/task-independence.test.mjs   per-task completion and reusable collect
+test/workspace-selection.test.mjs workspace matching and the ZCodeProject default
 ```
 
 Run the tests with plain Node (no test runner needed):
