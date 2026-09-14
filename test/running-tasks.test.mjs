@@ -20,9 +20,14 @@ const assert = (label, ok) => {
 /** A session whose client is stubbed, bypassing connect(). */
 function stubSession(tasks, { workspaces = [] } = {}) {
   const session = new ZcodeRemoteSession({ url: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+  const wsList = { activeWorkspaceKey: 'ws', activeTaskId: 't-active', workspaces, tasks }
   const client = {
-    listWorkspaces: async () => ({ activeWorkspaceKey: 'ws', activeTaskId: 't-active', workspaces, tasks }),
+    listWorkspaces: async () => wsList,
   }
+  // taskList/runningTaskCount/listStatus go through ensureClient + wsList;
+  // bridge-scoped calls go through ensureReady. Stub both layers.
+  session.ensureClient = async () => client
+  session.wsList = wsList
   session.ensureReady = async () => ({ client, bridge: { workspacePath: 'D:\\x' } })
   return session
 }

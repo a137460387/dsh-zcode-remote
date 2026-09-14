@@ -66,6 +66,38 @@ On top of that the plugin registers five dsh agent tools:
 All client-scoped tools accept `device` or `url` to choose the client
 (see [Reaching several machines](#reaching-several-machines)).
 
+## Choosing a workspace
+
+A workspace is one open project folder on the desktop. Every client tool accepts
+an optional `workspace`, resolved against the client's open workspaces by exact
+path, basename, or a unique trailing suffix — so "ZCodeProject" matches
+`C:\Users\HUAWEI\ZCodeProject` and "dhsh" matches `D:\tools\dhsh` without the
+full path.
+
+If you name nothing, the call lands in the **default workspace**
+(`config.defaultWorkspace`, which is `ZCodeProject` unless you set it in the
+profile patch layer). If the default is not open on that client, the call fails
+with the list of open workspaces instead of guessing.
+
+```
+zcode_remote_status(device:"hp")                        # workspaces + tasks
+zcode_remote_status(device:"hp", workspace:"ZCodeProject")
+zcode_remote_dispatch(device:"hp", workspace:"dhsh", text:"…")
+```
+
+One connection serves every workspace on a client: switching workspaces opens a
+new bridge on the same socket, never a second connection. An ambiguous selector
+(for example a basename that matches two open folders) fails loud rather than
+picking one.
+
+To pin the default for every call, set it in the profile patch layer:
+
+```yaml
+- id: zcode-remote
+  config:
+    defaultWorkspace: ZCodeProject
+```
+
 ## Running several tasks on one client
 
 Two hard constraints shape this, both verified against the client's own code:
