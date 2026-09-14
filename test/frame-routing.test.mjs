@@ -171,12 +171,44 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
   assert('frames under the new id reach the dispatch', a.rows.get(5)?.text === 'after resub')
 }
 
-// ---- createTask returns the desktop's new task id ----
+// ---- createTask issues a createSession command and surfaces the new id ----
 {
   const { session } = harness()
+  const commands = []
   session.ensureReady = async () => ({
-    client: { createTask: async () => ({ sessionId: 'sess_new', raw: {} }) },
+    client: {
+      makeNewSessionCommand: (workspaceKey, text) => ({ type: 'createSession', sessionId: null, payload: { workspaceId: workspaceKey } }),
+      sendConversationCommand: async (_ws, env) => {
+        commands.push(env)
+        return { status: 'accepted', result: { type: 'createSession', sessionId: 'sess_new' } }
+      },
+    },
     bridge: { workspacePath: 'D:\\x' },
+    workspaceKey: 'D:\\x',
   })
   assert('createTask surfaces the new task id', await session.createTask() === 'sess_new')
+  assert('createTask created with no first input', commands[0].type === 'createSession' && commands[0].payload.workspaceId === 'D:\\x')
+}
+
+// ---- startDispatch({newTask:true}) binds AND starts the task in one command ----
+{
+  const { session, listeners, subscribed, sent } = harness()
+  const created = []
+  const client = {
+    listen: (channel, event, handler, arg) => { listeners.push({ channel, event, handler, arg }); return () => {} },
+    subscribeConversation: async (workspacePath, sessionId) => {
+      subscribed.push({ workspacePath, sessionId })
+      return { ack: { subscriptionId: 'sub-newtask' } }
+    },
+    sendConversationCommand: async (_ws, env) => { created.push(env); sent.push(env); return { status: 'accepted', result: { type: 'createSession', sessionId: 'sess_newtask' } } },
+    makeCommand: (sessionId, type, payload) => ({ commandId: 'cmd', clientId: 't', sessionId, type, payload, issuedAt: 1 }),
+    makeNewSessionCommand: (workspaceKey, text) => ({ type: 'createSession', sessionId: null, payload: { workspaceId: workspaceKey, firstInput: { text } }, issuedAt: 1 }),
+    unsubscribeConversation: async () => ({ ok: true }),
+  }
+  session.ensureReady = async () => ({ client, bridge: { workspacePath: 'D:\\x' }, workspaceKey: 'D:\\x' })
+  const h = await session.startDispatch({ text: 'hello new task', newTask: true })
+  assert('new-task dispatch targets the created session', h.taskId === 'sess_newtask')
+  assert('the prompt rides the createSession command', created[0].type === 'createSession' && created[0].payload.firstInput.text === 'hello new task')
+  assert('no separate sendText was issued', !created.some(e => e.type === 'sendText'))
+  assert('the new session was subscribed', subscribed.some(s => s.sessionId === 'sess_newtask'))
 }
