@@ -159,3 +159,40 @@ assert('a custom ceiling is honoured', capacityRefusal(3, 5) === undefined && ca
     delete ZcodeRemoteSession.prototype.dispose
   }
 }
+
+// ---- Tool outputs must be lossless JSON even when the desktop omits fields ----
+// dsh rejects results holding undefined-valued properties (they vanish in a JSON
+// round trip), and real desktops omit displayStatus on some clients entirely.
+{
+  const { apply, pruneUndefined } = await import('../lib/index.js')
+  const { ZcodeRemoteSession } = await import('../lib/zcode-remote-client.js')
+  const tools = new Map()
+  const wsList = {
+    activeWorkspaceKey: 'D:\\x', activeTaskId: 't',
+    workspaces: [
+      { workspacePath: 'D:\\x', workspaceIdentity: undefined, kind: undefined },
+      { workspacePath: 'C:\\Users\\x\\ZCodeProject', workspaceIdentity: undefined, kind: undefined },
+    ],
+    tasks: [{ taskId: 't1', title: undefined, displayStatus: undefined, workspacePath: 'C:\\Users\\x\\ZCodeProject', updatedAt: undefined }],
+  }
+  const stubClient = { state: 'paired', ws: { readyState: 1 }, listWorkspaces: async () => wsList, close: () => {} }
+  const origEnsure = ZcodeRemoteSession.prototype.ensureClient
+  ZcodeRemoteSession.prototype.ensureClient = async function () { return stubClient }
+  const hasUndefined = v => v === undefined
+    || (Array.isArray(v) ? v.some(hasUndefined) : v && typeof v === 'object' ? Object.values(v).some(hasUndefined) : false)
+  try {
+    apply({ logger: {}, effect: () => () => {}, tools: { register: t => { tools.set(t.name, t); return () => {} } } },
+      { remoteUrl: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+    const status = tools.get('zcode_remote_status')
+    const out = await status.execute({}, { signal: { aborted: false } })
+    assert('status output carries no undefined-valued property', !hasUndefined(out))
+    assert('omitted desktop fields are dropped rather than kept as undefined', !('status' in out.tasks[0]) && !('title' in out.tasks[0]))
+    const scoped = await status.execute({ workspace: 'D:\\x' }, { signal: { aborted: false } })
+    assert('a scoped status reports an integer scopedTotalCount',
+      Number.isInteger(scoped.scopedTotalCount) && !hasUndefined(scoped))
+    assert('pruneUndefined output survives a JSON round trip',
+      JSON.stringify(JSON.parse(JSON.stringify(pruneUndefined({ a: undefined, b: [1, { c: undefined, d: null }] })))) === '{"b":[1,{"d":null}]}')
+  } finally {
+    ZcodeRemoteSession.prototype.ensureClient = origEnsure
+  }
+}
