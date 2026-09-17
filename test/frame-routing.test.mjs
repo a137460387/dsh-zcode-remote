@@ -211,6 +211,7 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
   assert('the prompt rides the createSession command', created[0].type === 'createSession' && created[0].payload.firstInput.text === 'hello new task')
   assert('no separate sendText was issued', !created.some(e => e.type === 'sendText'))
   assert('the new session was subscribed', subscribed.some(s => s.sessionId === 'sess_newtask'))
+  assert('a new task counts every row as its own output', h.before.size === 0)
 }
 
 // ---- The createSession envelope carries an explicit model selection ----
@@ -223,8 +224,15 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
     configured.payload.config?.provider === 'builtin:zai-start-plan'
     && configured.payload.config?.model === 'GLM-5.3-Flash'
     && configured.payload.config?.thought === 'max')
+  // firstInput.modelSelection stalls desktop 3.12.3 (task accepted, never starts,
+  // zero rows — verified live), and firstInput.mode is dropped by its activation
+  // path, so the first input must stay bare.
+  assert('the first input stays bare',
+    configured.payload.firstInput.text === 'go'
+    && configured.payload.firstInput.modelSelection === undefined
+    && configured.payload.firstInput.mode === undefined)
   const plain = client.makeNewSessionCommand('D:\\x', 'go')
-  assert('no selection means no config key', plain.payload.config === undefined && plain.payload.firstInput.text === 'go')
+  assert('no selection means no config key', plain.payload.config === undefined)
   const empty = client.makeNewSessionCommand('D:\\x')
   assert('an empty session carries neither input nor config',
     empty.payload.firstInput === undefined && empty.payload.config === undefined)

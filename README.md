@@ -311,17 +311,30 @@ alone is simply a default device with no name.
   being collected re-subscribes and keeps its stream.
 - **The running-task ceiling is per client**, not global: 3 slots on one client
   do not consume another's.
-- **Model & reasoning level**: a `new_task` dispatch starts on `model` with
-  reasoning level `thought`; the defaults are `GLM-5.3-Flash` at `max` (最高) on
-  the official Z.ai Start Plan channel (`builtin:zai-start-plan`, which serves
-  `GLM-5.3` and `GLM-5.3-Flash`; levels `low | high | max`), overridable per
-  call and via `defaultModel` / `defaultThought` / `defaultProvider` config. The
-  selection rides the createSession `config: { provider, model, thought }`
-  envelope, so a dispatch into an existing session (the sendText path) keeps
-  that session's model. Invalid values are **silently** replaced by desktop
-  defaults, so the dispatch/collect result reports the subscription snapshot's
-  `config` — that field, not agent self-reports, is the authority (a
+- **Model & reasoning level** (verified live): a `new_task` dispatch starts on
+  `model` with reasoning level `thought`; the defaults are `GLM-5.3-Flash` at
+  `max` (最高) sent to the official Z.ai Start Plan channel
+  (`builtin:zai-start-plan`, which serves `GLM-5.3` and `GLM-5.3-Flash`; levels
+  `low | high | max`), overridable per call and via `defaultModel` /
+  `defaultThought` / `defaultProvider` config. The selection rides the
+  createSession `config: { provider, model, thought }` envelope; the desktop
+  normalizes the provider to `account:zai-start-plan` and reports the model
+  back in the subscription snapshot. A dispatch into an existing session (the
+  sendText path) keeps that session's model. Invalid values are **silently**
+  replaced by desktop defaults, so the dispatch/collect result reports the
+  snapshot's `config` — that field, not agent self-reports, is the authority (a
   GLM-5.3-Flash agent reported `THOUGHT=high` while the snapshot showed `max`).
+- **Permission mode cannot be set over the relay** (verified against desktop
+  3.12.3): a dispatched task starts in the workspace default mode (`build`,
+  变更前确认). `createSession.firstInput.mode` exists in the desktop's own
+  schema (`build | edit | plan | yolo`, `yolo` = 完全访问) but its activation
+  path drops it, and `firstInput.modelSelection` — the other schema field —
+  stalls the task entirely (accepted, never starts, zero rows), so neither is
+  sent. The session mode resolves as modeOverride ?? SessionModeChanged events
+  ?? `permission.mode` settings ?? `build`. For unattended work, use the
+  desktop's own scheduled-task path (it defaults to `yolo`) or pick 完全访问
+  on the desktop for a session by hand. The effective mode is visible as
+  `config.mode` in the result whenever a snapshot echo arrives.
 - **Links are longer-lived than first measured**: the original 10-min TTL
   estimate came from a revoked test link. A freshly generated link stayed
   working for 45+ minutes of continuous dispatching. Still treat links as

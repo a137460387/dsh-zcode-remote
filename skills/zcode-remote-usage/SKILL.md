@@ -128,9 +128,16 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
 ## 已知限制（必须如实告知用户，不要掩饰）
 
 1. 模型与推理等级只对 new_task 派发生效（随 createSession 下发）；对已有 session 的追加
-   派发无法更换模型。provider 不能按次指定，只能通过 config.defaultProvider 改默认。
-   无效值会被桌面端静默替换成桌面默认——以结果回传的 config 字段为准。
-2. 部分客户端（已知惠普机）所有任务的 displayStatus 恒为 null，"最多 3 个并发"的满载拒绝
+   派发无法更换模型。provider 不能按次指定，只能通过 config.defaultProvider 改默认
+   （桌面端会把 builtin:zai-start-plan 归一为 account:zai-start-plan）。无效值会被桌面端
+   静默替换成桌面默认——以结果回传的 config 字段为准（GLM-5.3-Flash 的可用档位为
+   low | high | max）。
+2. 权限模式无法经中继设置（桌面端 3.12.3 实测）：派发的新任务一律以工作区默认模式
+   （build=变更前确认）启动。firstInput.mode 虽在桌面 schema 中但激活路径会丢弃；
+   firstInput.modelSelection 更会让任务卡死（被接受但永不开始、零输出），两者都绝不能发。
+   需要完全访问（yolo）时：让用户在桌面端为该会话手动选择，或走桌面端自己的计划任务
+   路径（其默认就是 yolo）。结果回传的 config.mode 是实际生效模式。
+3. 部分客户端（已知惠普机）所有任务的 displayStatus 恒为 null，"最多 3 个并发"的满载拒绝
    因此不触发——并发数需人工控制。
 
 ## 规则
