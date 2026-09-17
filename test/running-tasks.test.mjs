@@ -94,3 +94,68 @@ assert('counts above the ceiling still refuse', capacityRefusal(7, 3).includes('
 // An unreadable count must not block work: absence of evidence is not a full client.
 assert('an unknown count does not refuse', capacityRefusal(null, 3) === undefined)
 assert('a custom ceiling is honoured', capacityRefusal(3, 5) === undefined && capacityRefusal(5, 5) !== undefined)
+
+// ---- A call-level failure must never release the pairing ----
+// One link admits one connection, so a dropped pairing kills every sibling
+// task on the client. A capacity refusal or a bad workspace selector is a
+// problem with THIS call, not the connection — proven by sibling dispatches
+// still working afterwards through the plugin's own session cache.
+{
+  const { apply } = await import('../lib/index.js')
+  const { ZcodeRemoteSession } = await import('../lib/zcode-remote-client.js')
+  const tools = new Map()
+  let disposed = 0
+  const wsList = {
+    activeWorkspaceKey: 'D:\\x', activeTaskId: 't',
+    workspaces: [{ workspacePath: 'D:\\x', workspaceIdentity: '' }],
+    tasks: [task('a', 'running'), task('b', 'running')], // at the default ceiling of 2
+  }
+  const sent = []
+  const stubClient = {
+    state: 'paired', ws: { readyState: 1 },
+    listen: () => () => {},
+    listWorkspaces: async () => wsList,
+    openBridge: async () => ({ bridgeSessionId: 'b', workspacePath: 'D:\\x', workspaceIdentity: '' }),
+    agentHello: async () => ({}), agentInitialize: async () => ({}),
+    subscribeConversation: async () => ({ ack: { subscriptionId: 'sub-1' } }),
+    sendConversationCommand: async (_w, env) => { sent.push(env); return { status: 'accepted', result: { type: 'inputAccepted' } } },
+    unsubscribeConversation: async () => ({ ok: true }),
+    makeCommand: (s, t, p) => ({ commandId: 'c', clientId: 't', sessionId: s, type: t, payload: p, issuedAt: 1 }),
+    close: () => {},
+  }
+  const origEnsure = ZcodeRemoteSession.prototype.ensureClient
+  ZcodeRemoteSession.prototype.ensureClient = async function () { return stubClient }
+  ZcodeRemoteSession.prototype.dispose = function () { disposed++ }
+  try {
+    apply({
+      logger: {},
+      effect: () => () => {},
+      tools: { register: (t) => { tools.set(t.name, t); return () => {} } },
+    }, { remoteUrl: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+    const dispatch = tools.get('zcode_remote_dispatch')
+    const status = tools.get('zcode_remote_status')
+
+    let refusalError = null
+    try { await dispatch.execute({ text: 'x', new_task: true }, { signal: { aborted: false } }) } catch (e) { refusalError = e }
+    assert('a capacity refusal surfaces as a plain call error', refusalError?.message.includes('of 2'))
+    assert('the refusal does not carry the pairing-release note', !refusalError?.message.includes('pairing was released'))
+    assert('the refusal does not dispose the pairing', disposed === 0)
+
+    let workspaceError = null
+    try { await status.execute({ workspace: 'not-open-anywhere' }, { signal: { aborted: false } }) } catch (e) { workspaceError = e }
+    assert('a bad workspace selector lists the open ones', workspaceError?.message.includes('D:\\x'))
+    assert('the workspace error does not dispose the pairing', disposed === 0)
+
+    // The pairing is alive if a later dispatch still works on the same session:
+    // the desktop drops to one running task and two siblings go through.
+    wsList.tasks = [task('a', 'running')]
+    const r1 = await dispatch.execute({ text: 'sibling-1', session_id: 'sess_t', wait_seconds: 5, workspace: 'D:\\x' }, { signal: { aborted: false } })
+    const r2 = await dispatch.execute({ text: 'sibling-2', session_id: 'sess_t', wait_seconds: 5, workspace: 'D:\\x' }, { signal: { aborted: false } })
+    assert('a sibling dispatch after a refusal still works', r1.accepted === true && r2.accepted === true)
+    assert('both siblings sent their messages', sent.filter(e => e.type === 'sendText').length === 2)
+    assert('the pairing was never disposed across all four calls', disposed === 0)
+  } finally {
+    ZcodeRemoteSession.prototype.ensureClient = origEnsure
+    delete ZcodeRemoteSession.prototype.dispose
+  }
+}

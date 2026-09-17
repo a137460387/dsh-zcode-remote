@@ -101,3 +101,50 @@ const WS_LIST = () => ({
     Object.assign(ZcodeRemoteClient.prototype, wireSurface)
   }
 }
+
+// ---- A collect mid-flight survives a reconnect: the router is rebuilt ----
+// ensureClient clears frameRouters on reconnect; before the fix, resubscribe
+// never re-registered one, so frames for the fresh subscription had nowhere to
+// go and the collect burned its whole budget. Drive the REAL collect loop's
+// 30 s safety net with a reconnect mid-wait and prove frames still land.
+{
+  const session = new ZcodeRemoteSession({ url: LINK })
+  const listeners = []
+  let subSeq = 0
+  const stubClient = {
+    state: 'paired', ws: { readyState: 1 },
+    listen: (_channel, _event, handler) => { listeners.push(handler); return () => {} },
+    listWorkspaces: async () => WS_LIST(),
+    openBridge: async function () {
+      this.attachBridge({ bridgeSessionId: 'b1', workspacePath: 'D:\\x', workspaceIdentity: '' })
+      return { bridgeSessionId: 'b1', workspacePath: 'D:\\x', workspaceIdentity: '' }
+    },
+    agentHello: async () => ({}), agentInitialize: async () => ({}),
+    subscribeConversation: async () => ({ ack: { subscriptionId: `sub-${++subSeq}` } }),
+    sendConversationCommand: async () => ({ status: 'accepted', result: { type: 'inputAccepted' } }),
+    unsubscribeConversation: async () => ({ ok: true }),
+    makeCommand: (s, t, p) => ({ commandId: 'c', clientId: 't', sessionId: s, type: t, payload: p, issuedAt: 1 }),
+    close: () => {},
+  }
+  session.ensureReady = async () => {
+    session.ensureFrameRouter(stubClient, { bridgeSessionId: 'b1', workspacePath: 'D:\\x' })
+    return { client: stubClient, bridge: { bridgeSessionId: 'b1', workspacePath: 'D:\\x' }, workspaceKey: 'D:\\x' }
+  }
+  session.activeTaskId = 'sess_a'
+  const handle = await session.startDispatch({ text: 'x' })
+  assert('one router before reconnect', listeners.length === 1)
+
+  // Reconnect wipes the router; the collect loop's 30 s resubscribe must rebuild it.
+  session.frameRouters.clear()
+  assert('router is gone after reconnect', session.frameRouters.size === 0)
+  await session.resubscribe(handle)
+  assert('resubscribe re-registers the frame router', session.frameRouters.size === 1 && listeners.length === 2)
+
+  // Frames under the fresh subscription id route to the handle and settle it.
+  const deliver = listeners[listeners.length - 1]
+  deliver({ frame: { wireVersion: 3, kind: 'complete', topic: 'conversation/x', subscriptionId: handle.subscriptionId, frame: { payload: { kind: 'deltas', deltas: [{ rowId: 9, append: 'post-reconnect' }] } } } })
+  handle.lastChange = Date.now() - 20000
+  const result = await session.collectDispatch(handle, { waitMs: 50 })
+  assert('collect completes with the post-reconnect frame',
+    result.complete === true && JSON.stringify(result.replies) === '["post-reconnect"]')
+}
