@@ -60,6 +60,13 @@ assert('local discovery carries the machine id and configured name',
   parsed.searchParams.get('mid') === 'M_LOCAL' && parsed.searchParams.get('name') === 'LocalBox')
 assert('local discovery emits a fresh timestamp', Number(parsed.searchParams.get('t')) > 0)
 
+// The desktop's own copy-link builder (buildWebRemoteControlExternalQrUrl, read
+// out of the 3.12.3 bundle) emits sid, hash, t always, and mid, name,
+// app_version only when non-empty. app_version is optional on the wire — the
+// relay pairs without it (verified live against a running desktop).
+assert('the reconstructed link matches the desktop copy-link contract',
+  [...parsed.searchParams.keys()].filter(k => k !== 't').join(',') === 'sid,hash,mid,name')
+
 // Fallback path: when logs carry no sid, a provided sharedSetting path is used.
 const sharedDir = mkdtempSync(join(tmpdir(), 'zcode-shared-'))
 const sharedSetting = join(sharedDir, 'setting.json')

@@ -206,6 +206,19 @@ decrypted hash to disk. ZCode must still expose a currently active
 remote-control pairing; local discovery cannot activate or renew that pairing
 by itself.
 
+This mirrors the desktop's own copy-link builder
+(`buildWebRemoteControlExternalQrUrl`, read from the 3.12.3 bundle): the link
+is `https://zcode.z.ai/remote/v4` with `sid`, `hash`, `t` always, plus `mid`,
+`name`, `app_version` when non-empty. The plugin emits `sid`, `hash`, a fresh
+`t`, `mid`, and `name` (the host name); `app_version` is optional on the wire
+and the relay pairs without it (verified live). Every instance is its own
+device identity with its own `mid` — the main desktop and each zcode-multi
+slot differ — so a `home` pointing at an instance whose remote control is not
+the active pairing yields that instance's valid-but-unpaired link (the relay
+stays `waiting`). Match `home` to the instance showing the pairing. Verified
+live: reconstruction against a zcode-multi slot reproduced the copied link's
+`sid`, `hash`, `mid`, and `name` exactly and paired.
+
 **The sid is recovered from the instance's own log dir, not from the shared
 setting.json.** ZCode's `settingService` writes the sid to the *real user
 home's* setting.json (`~\.zcode\v2\setting.json`), ignoring a multi-open
