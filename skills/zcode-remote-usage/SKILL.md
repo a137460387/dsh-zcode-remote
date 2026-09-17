@@ -1,6 +1,6 @@
 ---
 name: zcode-remote-usage
-description: Use when driving a ZCode desktop from DSH through the zcode_remote_* tools — dispatching a task, collecting a reply, listing devices/workspaces/tasks, or stopping a remote task. Covers the remote-control link prerequisite, the five tools, single and parallel dispatch, model and reasoning-level selection, workspace and device addressing, verification, failure appearances, and known limits.
+description: Use when driving a ZCode desktop from DSH through the zcode_remote_* tools — dispatching a task, collecting a reply, listing devices/workspaces/tasks, or stopping a remote task. Covers the remote-control link prerequisite (or same-machine discovery), the five tools, single and parallel dispatch, model and reasoning-level selection, restart recovery via collect re-attach, workspace and device addressing, verification, failure appearances, and known limits.
 whenToUse: 任何要把工作发给 ZCode 桌面端执行的请求（本机或另一台机器），或检查、停止这类任务时。
 ---
 
@@ -123,7 +123,9 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
 
 ## 常见失败外观
 
-- 链接过期/被吊销：中继拒绝或直接断开连接，需重新生成链接。
+- 链接过期/被吊销（仅配了链接的远端设备）：中继拒绝或直接断开连接，需重新生成链接。
+  同机 localDevice 重建的链接每次现取、不存在过期；连接停在 waiting 通常说明指向了
+  没有活跃配对的实例（该实例 mid 与持有配对的实例不同）。
 - 桌面端没运行：workspace-bridge-error(desktop-disconnected)。
 - 工作区没打开：报错并列出已打开工作区清单。
 - 客户端并发已满：dispatch 立即拒绝并给出计数、指向 zcode_remote_stop，不排队耗掉等待预算。
@@ -150,5 +152,7 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
 2. 一次 dispatch = 目标桌面端一条用户消息。不要为"保险"重复派发同一任务。
 3. 同一条链接不要在多处同时使用（单终端约束）。
 4. 长任务用 async: true + 多次 collect，不要用超大 wait_seconds 硬等。
-5. 派发前确认目标 ZCode 桌面端在运行、目标工作区已打开。
-6. 工具报错原样转述（含它给出的候选清单），不要猜测或改写目标。
+5. 保存派发结果返回的 session_id：dsh 重启后 collect 靠它重挂任务（只读恢复，
+   不发消息），桌面端跑完的结果也能取回。
+6. 派发前确认目标 ZCode 桌面端在运行、目标工作区已打开。
+7. 工具报错原样转述（含它给出的候选清单），不要猜测或改写目标。

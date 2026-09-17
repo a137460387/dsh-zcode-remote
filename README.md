@@ -15,7 +15,7 @@ The plugin implements the full client stack of `https://zcode.z.ai/remote/v4`
 | App payloads | `{zcode_type: …}` inside `{type:'data'}`: `bootstrap-request`, `workspace-list-request`, `workspace-bridge-open` → `workspace-bridge-ready` |
 | rpc-frame | logical messages fragmented into CRC32-checked base64 frames (`seq`/`messageSeq`/`fragmentIndex`/`fragmentCount`), acked with `rpc-frame-ack` |
 | Channel RPC | VS Code style binary protocol (`[100,id,channel,method]+args`, `201/202/204` responses), varint-prefixed tagged values |
-| Services | channel `zcode-agent`: `helloConversationV4`, `initializeConversationV4`, `subscribeConversationV4`, `sendConversationCommandV4`, `onDynamicConversationFrame` |
+| Services | channel `zcode-agent`: `helloConversationV4`, `initializeConversationV4`, `subscribeConversationV4`, `unsubscribeConversationV4`, `sendConversationCommandV4`, `onDynamicConversationFrame` |
 
 ## Checking how many tasks are running
 
@@ -154,6 +154,18 @@ budget. Only a *completed* task releases its subscription, so a long-lived
 pairing does not accumulate them, and an aborted collect never drops the shared
 connection — the socket is held per client, so losing it would take down every
 task on that client at once.
+
+### After a dsh restart
+
+The desktop keeps running its tasks no matter what happens to this plugin, and
+a task's `session_id` (which every dispatch result carries) is all it takes to
+reconnect: `zcode_remote_collect(session_id:"sess_…")` re-attaches by
+subscribing to the conversation and reading its rows back — no message is
+sent, and a task that is still working keeps streaming into the new
+subscription. A collect that outlives its wait budget works the same way, so
+the recovery loop is always: keep the `session_id`, call collect until
+`complete` is true. The dispatch registry itself is in-memory only and needs
+no persistence — re-attaching is the recovery path.
 
 ## Install
 
