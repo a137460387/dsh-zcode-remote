@@ -25,7 +25,7 @@ means the task is actively working. A ZCode client serves a bounded number of
 concurrently working tasks, so `zcode_remote_status` reports the count:
 
 ```
-Running tasks: 1 of 3 allowed (7 total)
+Running tasks: 1 of 2 allowed (7 total)
 ```
 
 `runningCount` is computed from the **complete** task list, not the 20-task view
@@ -44,7 +44,7 @@ wire-protocol constant:
 ```yaml
 - id: zcode-remote
   config:
-    maxRunningTasks: 3   # default
+    maxRunningTasks: 3   # raise to the desktop's hard limit; default 2
 ```
 
 
@@ -117,20 +117,21 @@ Two hard constraints shape this, both verified against the client's own code:
    opens a second socket for a second task. Keep the phone/browser page for a
    link closed while this plugin uses it, or the two will kick each other
    endlessly (both sides auto-reconnect).
-2. **A client serves a bounded number of concurrent tasks** (`maxRunningTasks`,
-   default 3). Concurrent tasks each get their own conversation (`new_task:
-   true`) or an explicitly named `session_id`, and are told apart by the
-   `subscriptionId` each `subscribeConversationV4` returns — that id, not the
-   socket, separates one task's output from another's.
+2. **A client serves a bounded number of concurrent tasks.** The desktop's hard
+   limit is 3 — a task beyond it makes the running ones stop, so this plugin's
+   capacity guard defaults to 2, the stable operating point
+   (`maxRunningTasks` raises it). Concurrent tasks each get their own
+   conversation (`new_task: true`) or an explicitly named `session_id`, and are
+   told apart by the `subscriptionId` each `subscribeConversationV4` returns —
+   that id, not the socket, separates one task's output from another's.
 
 Fan out and gather:
 
 ```
-# three tasks on one client, or spread over several — dispatches are
+# two tasks on one client (or spread over several) — dispatches are
 # concurrency-safe, so issue them together
 zcode_remote_dispatch(device:"hw", text:"…", new_task:true, async:true)  → sessionId
 zcode_remote_dispatch(device:"hp", text:"…", new_task:true, async:true)  → sessionId
-zcode_remote_dispatch(device:"hw", text:"…", new_task:true, async:true)  → sessionId
 
 zcode_remote_collect(device:"hw", session_id:"sess_…")   # each reply, when ready
 zcode_remote_collect(device:"hp", session_id:"sess_…")
@@ -322,8 +323,8 @@ alone is simply a default device with no name.
   that connection drops, the pairing rebuilds on the next call: a fresh socket
   re-bridges the workspace and re-runs the agent handshake, and a task that was
   being collected re-subscribes and keeps its stream.
-- **The running-task ceiling is per client**, not global: 3 slots on one client
-  do not consume another's.
+- **The running-task ceiling is per client**, not global: concurrent tasks on
+  one client do not consume another client's slots.
 - **Model & reasoning level** (verified live): a `new_task` dispatch starts on
   `model` with reasoning level `thought`; the defaults are `GLM-5.3-Flash` at
   `max` (最高) sent to the official Z.ai Start Plan channel

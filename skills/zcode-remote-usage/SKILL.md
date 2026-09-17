@@ -81,13 +81,16 @@ zcode_remote_* 五个。一次调用 = 目标桌面端的一条用户消息。
 - 完成判据：默认等回复；任务产生过回复且之后静默 12 秒即算完成。wait_seconds 只是等待预算
   （默认 180 秒，上限 600 秒）；预算耗尽不算失败，回复仍在订阅里，稍后再取即可。
 
-并行（一台 ZCode 客户端最多 3 个并发任务）：
+## 并行（每实例建议最多 2 个并发任务）
+
+桌面端硬上限是 3：同时跑超过 3 个会让正在运行的任务停下来。插件守卫默认 2（config.maxRunningTasks
+可上调到 3），所以 stable 并行是两个任务：
     zcode_remote_dispatch(text:"A", new_task:true, async:true, device:"hp")  → sessionId
     zcode_remote_dispatch(text:"B", new_task:true, async:true, device:"hp")  → sessionId
-    zcode_remote_dispatch(text:"C", new_task:true, async:true, device:"hp")  → sessionId
     然后逐个 zcode_remote_collect(session_id:"sess_…", device:"hp")
 
 async: true 在任务被接受后立即返回；collect 不会干扰同一客户端上的其他任务。
+不要为提速同时派第 3 个任务——那会把前两个挤停，得不偿失。
 
 ## 模型与推理等级
 
@@ -137,8 +140,8 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
    firstInput.modelSelection 更会让任务卡死（被接受但永不开始、零输出），两者都绝不能发。
    需要完全访问（yolo）时：让用户在桌面端为该会话手动选择，或走桌面端自己的计划任务
    路径（其默认就是 yolo）。结果回传的 config.mode 是实际生效模式。
-3. 部分客户端（已知惠普机）所有任务的 displayStatus 恒为 null，"最多 3 个并发"的满载拒绝
-   因此不触发——并发数需人工控制。
+3. 部分客户端（已知惠普机）所有任务的 displayStatus 恒为 null，并发守卫因此失明——
+   并发数需人工控制，每实例同时不超过 2 个。
 
 ## 规则
 
