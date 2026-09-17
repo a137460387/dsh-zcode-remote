@@ -9,7 +9,7 @@
 // These checks drive the real routing/absorbing code with synthetic frames, so no
 // relay is needed.
 
-import { ZcodeRemoteSession } from '../lib/zcode-remote-client.js'
+import { ZcodeRemoteClient, ZcodeRemoteSession, sessionConfig } from '../lib/zcode-remote-client.js'
 
 const assert = (label, ok) => {
   console.log(ok ? `PASS ${label}` : `FAIL ${label}`)
@@ -211,4 +211,77 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
   assert('the prompt rides the createSession command', created[0].type === 'createSession' && created[0].payload.firstInput.text === 'hello new task')
   assert('no separate sendText was issued', !created.some(e => e.type === 'sendText'))
   assert('the new session was subscribed', subscribed.some(s => s.sessionId === 'sess_newtask'))
+}
+
+// ---- The createSession envelope carries an explicit model selection ----
+{
+  const client = new ZcodeRemoteClient({ url: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+  const configured = client.makeNewSessionCommand('D:\\x', 'go', {
+    provider: 'builtin:zai-start-plan', model: 'GLM-5.3-Flash', thought: 'max',
+  })
+  assert('the config rides the createSession payload',
+    configured.payload.config?.provider === 'builtin:zai-start-plan'
+    && configured.payload.config?.model === 'GLM-5.3-Flash'
+    && configured.payload.config?.thought === 'max')
+  const plain = client.makeNewSessionCommand('D:\\x', 'go')
+  assert('no selection means no config key', plain.payload.config === undefined && plain.payload.firstInput.text === 'go')
+  const empty = client.makeNewSessionCommand('D:\\x')
+  assert('an empty session carries neither input nor config',
+    empty.payload.firstInput === undefined && empty.payload.config === undefined)
+}
+
+// ---- sessionConfig drops unspecified fields ----
+{
+  assert('a full selection is kept verbatim',
+    JSON.stringify(sessionConfig({ provider: 'p', model: 'm', thought: 'max' }))
+      === '{"provider":"p","model":"m","thought":"max"}')
+  assert('unspecified fields are dropped', JSON.stringify(sessionConfig({ model: 'GLM-5.3' })) === '{"model":"GLM-5.3"}')
+  assert('an empty selection is no config at all', sessionConfig({}) === undefined && sessionConfig() === undefined)
+}
+
+// ---- startDispatch forwards the model selection to the createSession command ----
+{
+  const { session } = harness()
+  const created = []
+  const client = {
+    listen: () => () => {},
+    subscribeConversation: async () => ({ ack: { subscriptionId: 'sub-cfg' } }),
+    sendConversationCommand: async (_ws, env) => {
+      created.push(env)
+      return { status: 'accepted', result: { type: 'createSession', sessionId: 'sess_cfg' } }
+    },
+    makeCommand: (sessionId, type, payload) => ({ commandId: 'cmd', clientId: 't', sessionId, type, payload, issuedAt: 1 }),
+    makeNewSessionCommand: (workspaceKey, text, config) => ({
+      type: 'createSession', sessionId: null, issuedAt: 1,
+      payload: {
+        workspaceId: workspaceKey,
+        ...(text !== undefined ? { firstInput: { text } } : {}),
+        ...(config ? { config } : {}),
+      },
+    }),
+    unsubscribeConversation: async () => ({ ok: true }),
+  }
+  session.ensureReady = async () => ({ client, bridge: { workspacePath: 'D:\\x' }, workspaceKey: 'D:\\x' })
+  const h = await session.startDispatch({ text: 'think hard', newTask: true, model: 'GLM-5.3', thought: 'high' })
+  assert('the selected model and level reach the command',
+    created[0].payload.config?.model === 'GLM-5.3' && created[0].payload.config?.thought === 'high')
+  assert('an unspecified provider stays out of the payload', created[0].payload.config?.provider === undefined)
+  assert('the dispatch handle still targets the created task', h.taskId === 'sess_cfg')
+}
+
+// ---- The subscription snapshot's config is the authority on what applied ----
+{
+  const { session, listeners } = harness()
+  const a = await session.startDispatch({ text: 'x' })
+  listeners[0].handler(frame(a.subscriptionId, {
+    kind: 'snapshot',
+    snapshot: { rows: { window: [] }, config: { provider: 'builtin:zai-start-plan', model: 'GLM-5.3-Flash', thought: 'max' } },
+  }))
+  assert('the snapshot config is captured', a.effectiveConfig?.model === 'GLM-5.3-Flash' && a.effectiveConfig?.thought === 'max')
+  listeners[0].handler(frame(a.subscriptionId, { kind: 'deltas', deltas: [{ rowId: 1, append: 'done' }] }))
+  a.lastChange = Date.now() - 20000
+  const result = await session.collectDispatch(a, { waitMs: 50 })
+  assert('the collect result reports the effective config', result.config?.model === 'GLM-5.3-Flash' && result.complete === true)
+  const b = await session.startDispatch({ text: 'y' })
+  assert('a snapshot without config leaves it unset', b.effectiveConfig === undefined)
 }

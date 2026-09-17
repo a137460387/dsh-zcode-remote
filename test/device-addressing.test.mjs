@@ -65,6 +65,8 @@ assert('all client tools accept `url`',
 assert('dispatch keeps its own parameters',
   ['text', 'session_id', 'wait_seconds', 'async', 'new_task']
     .every(p => p in tools.get('zcode_remote_dispatch').parameters.properties))
+assert('dispatch accepts model and thought overrides',
+  ['model', 'thought'].every(p => p in tools.get('zcode_remote_dispatch').parameters.properties))
 assert('`text` stays required', JSON.stringify(tools.get('zcode_remote_dispatch').parameters.required) === '["text"]')
 assert('collect requires a task id',
   JSON.stringify(tools.get('zcode_remote_collect').parameters.required) === '["session_id"]')

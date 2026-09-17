@@ -58,7 +58,10 @@ On top of that the plugin registers five dsh agent tools:
   prompt rides the createSession command's `firstInput.text` (the web page's
   "新建任务" path), because a relay-created session only binds to a desktop task
   when the first input rides creation; create-then-sendText fails with
-  `FOREIGN KEY constraint failed`.
+  `FOREIGN KEY constraint failed`. A `new_task` dispatch starts on `model`
+  (default `GLM-5.3-Flash`) at reasoning level `thought` (default `max`), and
+  the result's `config` field reports what the desktop actually applied; an
+  existing session keeps the model it started with.
 - **`zcode_remote_collect`** — fetch the reply of an async dispatch, by the same
   client and the `session_id` the dispatch returned. A task is released only once
   it has **completed** (a reply, then 12 s of silence); an unfinished one keeps
@@ -170,6 +173,9 @@ into the profile's user patch layer `~/.dsh/profiles/<profile>/cordis.patch.yml`
     # workspacePath: D:\some\repo        # pin a workspace instead of the active one
     # sessionId: sess_…                  # pin a task instead of the active one
     # waitSeconds: 180
+    # defaultModel: GLM-5.3              # new-task model; default GLM-5.3-Flash
+    # defaultThought: high               # new-task reasoning: low | high | max; default max
+    # defaultProvider: builtin:zai-start-plan   # default: the official Z.ai channel
 ```
 
 The link is optional at boot: a profile starts cleanly without it and the tools
@@ -305,17 +311,17 @@ alone is simply a default device with no name.
   being collected re-subscribes and keeps its stream.
 - **The running-task ceiling is per client**, not global: 3 slots on one client
   do not consume another's.
-- **Model & reasoning level**: a new task inherits the desktop's workspace
-  defaults unless specified. The Z.ai Start Plan channel (`builtin:zai-start-plan`)
-  serves `GLM-5.3` and `GLM-5.3-Flash`, with reasoning levels `low | high | max`
-  (`max` = 最高). The createSession envelope accepts
-  `config: { provider, model, thought }` — the standalone driver
-  (`remote-driver.mjs`, see the `.zcode-dsh` research dir) exposes this via
-  `--model/--thought/--provider`; this plugin does not yet expose it as a tool
-  parameter. Invalid values are **silently** replaced by desktop defaults, so
-  verify via the subscription snapshot's `config` field — agent self-reports are
-  unreliable (a GLM-5.3-Flash agent reported `THOUGHT=high` while the snapshot
-  showed `max`).
+- **Model & reasoning level**: a `new_task` dispatch starts on `model` with
+  reasoning level `thought`; the defaults are `GLM-5.3-Flash` at `max` (最高) on
+  the official Z.ai Start Plan channel (`builtin:zai-start-plan`, which serves
+  `GLM-5.3` and `GLM-5.3-Flash`; levels `low | high | max`), overridable per
+  call and via `defaultModel` / `defaultThought` / `defaultProvider` config. The
+  selection rides the createSession `config: { provider, model, thought }`
+  envelope, so a dispatch into an existing session (the sendText path) keeps
+  that session's model. Invalid values are **silently** replaced by desktop
+  defaults, so the dispatch/collect result reports the subscription snapshot's
+  `config` — that field, not agent self-reports, is the authority (a
+  GLM-5.3-Flash agent reported `THOUGHT=high` while the snapshot showed `max`).
 - **Links are longer-lived than first measured**: the original 10-min TTL
   estimate came from a revoked test link. A freshly generated link stayed
   working for 45+ minutes of continuous dispatching. Still treat links as

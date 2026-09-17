@@ -1,6 +1,6 @@
 ---
 name: zcode-remote-usage
-description: Use when driving a ZCode desktop from DSH through the zcode_remote_* tools — dispatching a task, collecting a reply, listing devices/workspaces/tasks, or stopping a remote task. Covers the remote-control link prerequisite, the five tools, single and parallel dispatch, workspace and device addressing, verification, failure appearances, and known limits.
+description: Use when driving a ZCode desktop from DSH through the zcode_remote_* tools — dispatching a task, collecting a reply, listing devices/workspaces/tasks, or stopping a remote task. Covers the remote-control link prerequisite, the five tools, single and parallel dispatch, model and reasoning-level selection, workspace and device addressing, verification, failure appearances, and known limits.
 whenToUse: 任何要把工作发给 ZCode 桌面端执行的请求（本机或另一台机器），或检查、停止这类任务时。
 ---
 
@@ -65,7 +65,7 @@ zcode_remote_* 五个。一次调用 = 目标桌面端的一条用户消息。
 - zcode_remote_devices()：列出可达设备，无需连接。零成本自检，第一步用它。
 - zcode_remote_status(device?/url?/workspace?)：该设备的打开工作区、最近任务、
   正在运行的任务数与并发上限。
-- zcode_remote_dispatch(text, session_id?, new_task?, async?, wait_seconds?,
+- zcode_remote_dispatch(text, session_id?, new_task?, model?, thought?, async?, wait_seconds?,
   device?/url?, workspace?)：派发任务。
 - zcode_remote_collect(session_id, wait_seconds?, device?/url?, workspace?)：取回异步任务的
   回复；可重复调用，未完成的任务不会丢流。
@@ -89,6 +89,19 @@ zcode_remote_* 五个。一次调用 = 目标桌面端的一条用户消息。
 
 async: true 在任务被接受后立即返回；collect 不会干扰同一客户端上的其他任务。
 
+## 模型与推理等级
+
+默认：每个 new_task 都以官方 Z.ai 通道（builtin:zai-start-plan）的 GLM-5.3-Flash、推理等级
+最高（max）启动；可用 config.defaultModel / defaultThought / defaultProvider 改默认。
+
+按次覆盖（仅 new_task 生效）：
+    zcode_remote_dispatch(text:"…", new_task:true, model:"GLM-5.3", thought:"high")
+可选模型：GLM-5.3-Flash、GLM-5.3；推理等级：low | high | max（max=最高）。
+
+- 模型选择随 createSession 下发，只对新建任务生效；对已有 session 的追加派发无法换模型。
+- 派发/collect 结果里的 config 字段是桌面端实际应用的配置（订阅快照回传）。无效值会被
+  桌面端静默替换成桌面默认，判断实际生效以该字段为准，不要信远端 agent 的自我报告。
+
 ## 寻址语义
 
 设备：device 传已配置的机器名；url 传完整链接；都不传用默认设备。
@@ -102,6 +115,7 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
 2. zcode_remote_status：目标在线、有空位、工作区已在列。
 3. 最小实连验证：zcode_remote_dispatch(text:"请只回复五个字：DSH-ZCODE-OK",
    new_task:true) —— 回 "DSH-ZCODE-OK" 即全链路通。
+4. 需要指定模型时，核对派发/collect 结果回传的 config 字段与要求一致。
 
 ## 常见失败外观
 
@@ -113,9 +127,9 @@ async: true 在任务被接受后立即返回；collect 不会干扰同一客户
 
 ## 已知限制（必须如实告知用户，不要掩饰）
 
-1. 插件目前不能指定模型与推理等级：新任务一律用桌面端当前默认模型。若用户要求指定模型
-   （如 GLM-5.3-Flash）或推理等级（最高=max），如实说明该能力尚在插件待办中，目前只有
-   独立驱动 remote-driver.mjs（支持 --model / --thought / --provider）可满足。
+1. 模型与推理等级只对 new_task 派发生效（随 createSession 下发）；对已有 session 的追加
+   派发无法更换模型。provider 不能按次指定，只能通过 config.defaultProvider 改默认。
+   无效值会被桌面端静默替换成桌面默认——以结果回传的 config 字段为准。
 2. 部分客户端（已知惠普机）所有任务的 displayStatus 恒为 null，"最多 3 个并发"的满载拒绝
    因此不触发——并发数需人工控制。
 
