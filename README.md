@@ -299,7 +299,10 @@ alone is simply a default device with no name.
 - **One terminal per link**: the relay allows a single live terminal per
   session — having the phone page and this driver connected at the same time
   kicks one of them (`KICKED`). Each configured client counts separately, and
-  one client's concurrent tasks share this plugin's single connection to it.
+  one client's concurrent tasks share this plugin's single connection to it. If
+  that connection drops, the pairing rebuilds on the next call: a fresh socket
+  re-bridges the workspace and re-runs the agent handshake, and a task that was
+  being collected re-subscribes and keeps its stream.
 - **The running-task ceiling is per client**, not global: 3 slots on one client
   do not consume another's.
 - **Model & reasoning level**: a new task inherits the desktop's workspace
@@ -339,6 +342,7 @@ test/local-credentials.test.mjs   local credential reconstruction and identity f
 test/protocol.test.mjs            wire codec: CRC32, framing, assembly
 test/device-addressing.test.mjs   target resolution and the tool surface
 test/session-cache.test.mjs       per-client session isolation
+test/reconnect.test.mjs           reconnect rebuilds bridges, handshake, and frame routing
 test/running-tasks.test.mjs       running-task counting and the capacity guard
 test/frame-routing.test.mjs       concurrent-task frame demultiplexing + new-task (firstInput) path
 test/task-independence.test.mjs   per-task completion and reusable collect
