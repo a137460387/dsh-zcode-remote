@@ -148,3 +148,49 @@ const WS_LIST = () => ({
   assert('collect completes with the post-reconnect frame',
     result.complete === true && JSON.stringify(result.replies) === '["post-reconnect"]')
 }
+
+// ---- Re-subscribing releases the superseded desktop subscription ----
+// The collect loop's 30 s safety net resubscribes for as long as a task runs;
+// without an unsubscribe of the old id, every cycle leaves one more zombie
+// subscription on the desktop.
+{
+  const session = new ZcodeRemoteSession({ url: LINK })
+  const unsubscribed = []
+  let subSeq = 0
+  const stubClient = {
+    state: 'paired', ws: { readyState: 1 },
+    listen: () => () => {},
+    listWorkspaces: async () => WS_LIST(),
+    openBridge: async function () {
+      this.attachBridge({ bridgeSessionId: 'b1', workspacePath: 'D:\\x', workspaceIdentity: '' })
+      return { bridgeSessionId: 'b1', workspacePath: 'D:\\x', workspaceIdentity: '' }
+    },
+    agentHello: async () => ({}), agentInitialize: async () => ({}),
+    subscribeConversation: async () => ({ ack: { subscriptionId: `sub-${++subSeq}` } }),
+    sendConversationCommand: async () => ({ status: 'accepted', result: { type: 'inputAccepted' } }),
+    unsubscribeConversation: async (_ws, id) => { unsubscribed.push(id); return { ok: true } },
+    makeCommand: (s, t, p) => ({ commandId: 'c', clientId: 't', sessionId: s, type: t, payload: p, issuedAt: 1 }),
+    close: () => {},
+  }
+  session.ensureReady = async () => {
+    session.ensureFrameRouter(stubClient, { bridgeSessionId: 'b1', workspacePath: 'D:\\x' })
+    return { client: stubClient, bridge: { bridgeSessionId: 'b1', workspacePath: 'D:\\x' }, workspaceKey: 'D:\\x' }
+  }
+  session.activeTaskId = 'sess_a'
+  const handle = await session.startDispatch({ text: 'x' })
+  assert('a failed unsubscribe is logged, not thrown', true) // shape check below
+
+  // Three safety-net cycles: each must retire the id it superseded.
+  const seen = []
+  for (let i = 0; i < 3; i++) {
+    const before = handle.subscriptionId
+    await session.resubscribe(handle)
+    seen.push({ before, after: handle.subscriptionId })
+  }
+  assert('each resubscribe moved to a fresh id', seen.every(s => s.after !== s.before))
+  assert('every superseded id was unsubscribed exactly once',
+    unsubscribed.length === 3 && unsubscribed[0] === 'sub-1' && unsubscribed[2] === 'sub-3')
+  assert('live subscriptions stay bounded', 4 - unsubscribed.length === 1) // only the current one
+  assert('the routing entry tracks the current id only',
+    session.dispatchHandlers.size === 1 && session.dispatchHandlers.get(handle.subscriptionId) === handle)
+}

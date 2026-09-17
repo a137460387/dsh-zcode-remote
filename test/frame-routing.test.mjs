@@ -18,9 +18,11 @@ const assert = (label, ok) => {
 
 /**
  * A session with a stubbed client that records listeners, so frames can be
- * delivered by hand exactly as the deskop would deliver them.
+ * delivered by hand exactly as the deskop would deliver them. `subId` is what
+ * the desktop's subscribe ack carries: an id (default) or null for desktops
+ * that return none.
  */
-function harness(taskId = 'sess_active') {
+function harness(taskId = 'sess_active', subId) {
   const session = new ZcodeRemoteSession({ url: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
   const listeners = []
   const sent = []
@@ -35,7 +37,7 @@ function harness(taskId = 'sess_active') {
     },
     subscribeConversation: async (workspacePath, sessionId) => {
       subscribed.push({ workspacePath, sessionId })
-      const subscriptionId = `sub-${++nextSub}`
+      const subscriptionId = subId === undefined ? `sub-${++nextSub}` : subId
       return { ack: { subscriptionId } }
     },
     sendConversationCommand: async (workspacePath, envelope) => {
@@ -112,6 +114,29 @@ const assistantRow = (rowId, text, state = 'complete') => ({ rowId, kind: 'assis
   const only = await session.startDispatch({ text: 'only' })
   listeners[0].handler(frame(undefined, { kind: 'deltas', deltas: [{ rowId: 7, append: 'solo' }] }))
   assert('a single dispatch accepts an unlabelled frame', only.rows.get(7)?.text === 'solo')
+}
+
+// ---- A desktop that returns no subscriptionId: keys never collide ----
+// With `session:<target>` as the fallback key, two dispatches into one task
+// overwrote each other's routing and spliced their replies together.
+{
+  const { session, listeners, subscribed } = harness('sess_active', null)
+  const a = await session.startDispatch({ text: 'first', sessionId: 'sess_same' })
+  const b = await session.startDispatch({ text: 'second', sessionId: 'sess_same' })
+  assert('both dispatches to one target hold separate routing entries',
+    a.key !== b.key && session.dispatchHandlers.get(a.key) === a && session.dispatchHandlers.get(b.key) === b)
+  assert('neither handle claims a subscription id', a.subscriptionId === null && b.subscriptionId === null)
+
+  // Unlabelled frames reach only the single active dispatch; with two in
+  // flight they are dropped rather than spliced into a guess.
+  const deliver = listeners[0].handler
+  deliver(frame(undefined, { kind: 'deltas', deltas: [{ rowId: 31, append: 'to-a' }] }))
+  assert('a frame while two are active reaches neither handle', !a.rows.has(31) && !b.rows.has(31))
+  a.settled = true
+  session.dispatchHandlers.delete(b.key) // b leaves the picture
+  deliver(frame(undefined, { kind: 'deltas', deltas: [{ rowId: 32, append: 'solo' }] }))
+  assert('a frame once a alone remains lands on it', a.rows.get(32)?.text === 'solo')
+  assert('both dispatches subscribed the same task', subscribed.every(s => s.sessionId === 'sess_same'))
 }
 
 // ---- A snapshot seeds rows; deltas append; before-rows are excluded ----
