@@ -68,7 +68,8 @@ zcode_remote_* 五个。一次调用 = 目标桌面端的一条用户消息。
 - zcode_remote_dispatch(text, session_id?, new_task?, model?, thought?, async?, wait_seconds?,
   device?/url?, workspace?)：派发任务。
 - zcode_remote_collect(session_id, wait_seconds?, device?/url?, workspace?)：取回异步任务的
-  回复；可重复调用，未完成的任务不会丢流。
+  回复；可重复调用，未完成的任务不会丢流。dsh 重启后按 session_id 重新挂上任务
+  （只订阅读回，不发消息），桌面端还在跑或已完成的任务都能接回来。
 - zcode_remote_stop(session_id?, device?/url?, workspace?)：中断正在跑的远端任务。
 
 ## 派发

@@ -113,3 +113,39 @@ const settle = (handle) => { handle.lastChange = Date.now() - 20000 }
   const r = await session.collectDispatch(a, { waitMs: 1 })
   assert('answers from both windows are reported', JSON.stringify(r.replies) === '["part 1","part 2"]')
 }
+
+// ---- A task from before a restart can be re-attached without sending ----
+{
+  const session = new ZcodeRemoteSession({ url: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+  const listeners = []
+  const commands = []
+  const unsubscribed = []
+  let nextSub = 0
+  const client = {
+    listen: (channel, event, handler) => { listeners.push(handler); return () => {} },
+    subscribeConversation: async () => ({ ack: { subscriptionId: `sub-${++nextSub}` } }),
+    sendConversationCommand: async (_ws, env) => { commands.push(env); return { status: 'accepted', result: { type: 'inputAccepted' } } },
+    unsubscribeConversation: async (_ws, subscriptionId) => { unsubscribed.push(subscriptionId); return { ok: true } },
+  }
+  session.ensureReady = async () => ({ client, bridge: { workspacePath: 'D:\\x' }, workspaceKey: 'D:\\x' })
+
+  const handle = await session.reattachDispatch('sess_re', 'D:\\x')
+  assert('reattach subscribes without sending a message', commands.length === 0 && Boolean(handle.subscriptionId))
+  assert('reattach counts every row as the task\'s own output', handle.before.size === 0)
+  assert('reattach is routable', session.dispatchHandlers.get(handle.key) === handle)
+
+  // The subscription snapshot replays the conversation the desktop kept; the
+  // task's reply from before the restart is in it.
+  listeners[0](frame(handle.subscriptionId, {
+    kind: 'snapshot',
+    snapshot: { rows: { window: [
+      { rowId: 1, kind: 'userText', text: 'the original prompt', state: 'complete' },
+      { rowId: 2, kind: 'assistantText', text: 'the pre-restart reply', state: 'complete' },
+    ] } },
+  }))
+  settle(handle)
+  const result = await session.collectDispatch(handle, { waitMs: 50 })
+  assert('collect after reattach reports the pre-restart reply',
+    result.complete === true && JSON.stringify(result.replies) === '["the pre-restart reply"]')
+  assert('a completed reattach releases the subscription', unsubscribed.length === 1 && !session.dispatchHandlers.has(handle.key))
+}

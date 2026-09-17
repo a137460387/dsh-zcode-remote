@@ -66,6 +66,10 @@ On top of that the plugin registers five dsh agent tools:
   client and the `session_id` the dispatch returned. A task is released only once
   it has **completed** (a reply, then 12 s of silence); an unfinished one keeps
   its subscription, so calling collect again simply keeps waiting for it.
+  Collect also survives a dsh restart: with no in-memory entry for the task it
+  re-attaches by `session_id` — subscribing to the conversation and reading its
+  rows back without sending anything — so a task the desktop is still running
+  can be picked up again.
 - **`zcode_remote_status`** — list one client's workspaces, recent tasks and
   running-task count.
 - **`zcode_remote_devices`** — list the reachable clients, their configured
