@@ -57,6 +57,31 @@ assert('reports a full client as 3', full === 3)
 const over = await stubSession(Array.from({ length: 5 }, (_, i) => task(`t${i}`, 'running'))).runningTaskCount()
 assert('reports a count above the limit when it exceeds it', over === 5 && over > 3)
 
+// The snapshot is re-fetched on every read: a pairing outlives one status call,
+// so a connect-time list would freeze the count while tasks start and finish
+// elsewhere on the desktop.
+{
+  const session = new ZcodeRemoteSession({ url: 'https://zcode.z.ai/remote/v4?sid=S&hash=H' })
+  const tasks = [task('t1', 'running')]
+  const client = {
+    listWorkspaces: async () => ({
+      activeWorkspaceKey: 'ws',
+      activeTaskId: tasks[0].taskId,
+      workspaces: [],
+      tasks: tasks.map(t => ({ ...t })),
+    }),
+  }
+  session.ensureClient = async () => client
+  session.wsList = { activeWorkspaceKey: 'ws', activeTaskId: 't1', workspaces: [], tasks: tasks.map(t => ({ ...t })) }
+  const first = await session.listStatus()
+  assert('the first status read sees the current task', first.runningTaskIds[0] === 't1')
+  tasks[0] = task('t1', 'completed')
+  tasks.push(task('t2', 'running'))
+  const second = await session.listStatus()
+  assert('a later status read sees tasks that changed since the first call', second.runningTaskIds[0] === 't2')
+  assert('the capacity guard reads the refreshed list too', await session.runningTaskCount() === 1)
+}
+
 // The capacity rule itself. `>= max` refuses, so exactly 3 running slots blocks a
 // fourth dispatch; 2 still has room.
 const refusal = capacityRefusal(3, 3)

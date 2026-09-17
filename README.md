@@ -30,7 +30,9 @@ Running tasks: 1 of 3 allowed (7 total)
 
 `runningCount` is computed from the **complete** task list, not the 20-task view
 the tool renders — a running task past that window would otherwise be missed and
-a dispatch into an already-full client would go through.
+a dispatch into an already-full client would go through. The list is re-fetched
+at every status read and before every dispatch, so a long-lived pairing reports
+current counts rather than a connect-time snapshot.
 
 `zcode_remote_dispatch` checks the same count before sending: at the ceiling it
 fails immediately with the count and points at `zcode_remote_stop`, instead of
