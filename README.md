@@ -174,6 +174,80 @@ The link is optional at boot: a profile starts cleanly without it and the tools
 explain what to pass. That keeps the link out of the profile for setups that
 prefer supplying it per call.
 
+### Discover a ZCode desktop on the same Windows machine
+
+When dsh and ZCode run on the same computer, the plugin can reconstruct the
+remote-control URL from ZCode's local state instead of storing the URL or its
+`hash` in the profile:
+
+```yaml
+- id: zcode-remote
+  config:
+    localDevice:
+      home: C:\Users\luoguangyu
+      username: luoguangyu
+      label: local        # optional; default "local"
+      name: My-PC         # optional; defaults to the host name
+```
+
+The plugin reads `telemetry-state.json` and `credentials.json` under
+`<home>\.zcode\v2`, decrypts `pass_hash` with the same fallback secret as
+ZCode, recovers the instance's current `sid` from its own log lines, and
+creates a fresh URL timestamp on every resolution. It never writes the URL or
+decrypted hash to disk. ZCode must still expose a currently active
+remote-control pairing; local discovery cannot activate or renew that pairing
+by itself.
+
+**The sid is recovered from the instance's own log dir, not from the shared
+setting.json.** ZCode's `settingService` writes the sid to the *real user
+home's* setting.json (`~\.zcode\v2\setting.json`), ignoring a multi-open
+slot's data dir — so several slots overwrite one another's sid in that file.
+The instance's own `logs\*.log` carries its registrations (`external relay
+auth saved {deviceSidSuffix}`) plus full-sid `session=d_…` lines, which is the
+authoritative per-instance source. Pass `sharedSetting` to also try the shared
+file as a fallback when logs carry nothing.
+
+Set `home` and `username` explicitly when dsh runs as another account, such as
+`NT AUTHORITY\SYSTEM`; the ZCode credential key is bound to the desktop user's
+home and username, so `username` must name the ZCode process user. The
+decryption key's home dir is derived automatically: for a slot data dir
+`<user>\AppData\Roaming\zcode-multi\<N>\data` it resolves to `<user>`; override
+with `secretHome` only when the ZCode user's home differs. If that ZCode
+process was launched with `ZCODE_CREDENTIAL_SECRET`, local fallback discovery
+cannot infer the secret; use a configured URL instead.
+
+### Discover several same-machine instances (multi-open slots)
+
+Each zcode-multi slot is an independent ZCode client (own account, mid, and
+pass_hash) discoverable by a short name:
+
+```yaml
+- id: zcode-remote
+  config:
+    localDevices:
+      s1: { home: C:\Users\luoguangyu\AppData\Roaming\zcode-multi\1\data, username: luoguangyu }
+      s2: { home: C:\Users\luoguangyu\AppData\Roaming\zcode-multi\2\data, username: luoguangyu }
+```
+
+Address a slot with `device:"s1"` etc.; `zcode_remote_devices()` lists every
+discovered instance. The default remains `localDevice` (or `device`/`remoteUrl`
+when set).
+
+The local device becomes the default only when `device`, `remoteUrl`, and the
+split `remoteSid`/`remoteHash` form are absent. Address it explicitly by its
+label when required:
+
+```
+zcode_remote_status(device:"local")
+zcode_remote_dispatch(device:"s2", workspace:"dhsh", text:"…", new_task:true)
+```
+
+> Recovered URLs reflect the instance's *current* registration. When several
+> slots are running, they re-register and rotate sids continuously (a
+> "registration war" against the shared setting.json); always resolve the URL
+> right before dispatching, and treat a `--verify`-style `waiting` result as
+> "URL is valid but that desktop is offline", not a credential failure.
+
 ## Reaching several machines
 
 A remote-control link identifies **one device pairing**, so a link selects
@@ -256,8 +330,10 @@ alone is simply a default device with no name.
 
 ```
 lib/zcode-remote-client.js        protocol driver (no dependencies, plain ESM)
+lib/local-zcode-credentials.js    same-machine ZCode credential discovery
 lib/index.js                      cordis plugin: Config + 5 tools, client routing
 cordis.patch.yml                  bundle layer: inserts the plugin entry
+test/local-credentials.test.mjs   local credential reconstruction and identity failures
 test/protocol.test.mjs            wire codec: CRC32, framing, assembly
 test/device-addressing.test.mjs   target resolution and the tool surface
 test/session-cache.test.mjs       per-client session isolation

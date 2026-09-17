@@ -10,7 +10,8 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib"
+    "lib",
+    "skills"
   ],
   "license": "MIT",
   "dsh": {

@@ -43,6 +43,12 @@ try {
 } catch (error) {
   assert(`Config accepts a device map (got ${error.message})`, false)
 }
+try {
+  const parsed = Config({ localDevice: { home: 'C:\\Users\\desk', username: 'desk' } })
+  assert('Config accepts local ZCode discovery', parsed.localDevice.home === 'C:\\Users\\desk')
+} catch (error) {
+  assert(`Config accepts local ZCode discovery (got ${error.message})`, false)
+}
 
 // ---- Five tools, all client-scoped except the roster ----
 const multi = { devices: { alpha: LINK_A, beta: LINK_B }, device: 'beta' }

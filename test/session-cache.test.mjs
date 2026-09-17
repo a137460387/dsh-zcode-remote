@@ -39,6 +39,8 @@ function makeCache() {
   const b1 = cache.acquire(LINK_B)
   assert('acquiring another device builds a second session', built.length === 2 && b1 !== a1)
   assert('the first device is left alone', a1.disposed === false)
+  const timestampOnly = LINK_A.replace('&t=1', '&t=999')
+  assert('a refreshed URL timestamp reuses the same session', cache.acquire(timestampOnly) === a1 && built.length === 2)
   const a3 = cache.acquire(LINK_A)
   assert('switching back reuses the first device', a3 === a1 && built.length === 2)
   assert('neither device was disposed by switching', a1.disposed === false && b1.disposed === false)
